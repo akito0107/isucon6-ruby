@@ -149,7 +149,7 @@ module Isuda
       |)
       entries.each do |entry|
         entry[:html] = htmlify(entry[:description])
-        stars = db.xquery(%| select * from star where keyword = ?|, entry[:keyword]).to_a
+        stars = db.xquery(%| select * from star where keyword = ?|, entry[:keyword] || '').to_a
         entry[:stars] = stars
       end
 
@@ -232,7 +232,7 @@ module Isuda
       keyword = params[:keyword] or halt(400)
 
       entry = db.xquery(%| select * from entry where keyword = ? |, keyword).first or halt(404)
-      stars = db.xquery(%| select * from star where keyword = ?|, keyword).to_a
+      stars = db.xquery(%| select * from star where keyword = ?|, keyword)
       entry[:stars] = stars
       entry[:html] = htmlify(entry[:description])
 
