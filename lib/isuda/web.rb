@@ -251,5 +251,21 @@ module Isuda
 
       redirect_found '/'
     end
+
+    post '/stars' do
+      keyword = params[:keyword] || ''
+      unless db.xquery(%| SELECT COUNT(*) FROM entry WHERE keyword = ?|,keyword).first > 0
+        halt(404)
+      end
+
+      user_name = params[:user]
+      db.xquery(%|
+        INSERT INTO star (keyword, user_name, created_at)
+        VALUES (?, ?, NOW())
+      |, keyword, user_name)
+
+      content_type :json
+      JSON.generate(result: 'ok')
+    end
   end
 end
