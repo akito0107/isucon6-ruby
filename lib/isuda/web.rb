@@ -257,7 +257,7 @@ module Isuda
 
     post '/stars' do
       keyword = params[:keyword] || ''
-      unless db.xquery(%| SELECT COUNT(*) FROM entry WHERE keyword = ?|,keyword).first > 0
+      unless db.xquery(%| SELECT COUNT(*) as key_count FROM entry WHERE keyword = ?|,keyword).first[:key_count].to_i > 0
         halt(404)
       end
 
