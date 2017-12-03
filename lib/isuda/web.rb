@@ -1,3 +1,4 @@
+# coding: utf-8
 require 'digest/sha1'
 require 'json'
 require 'net/http'
@@ -9,6 +10,7 @@ require 'mysql2-cs-bind'
 require 'rack/utils'
 require 'sinatra/base'
 require 'tilt/erubis'
+require 'redis'
 
 module Isuda
   class Web < ::Sinatra::Base
@@ -73,6 +75,14 @@ module Isuda
           end
       end
 
+      def redis
+        Thread.current[:redis] ||=
+	  begin
+            redis = Redis.new(db: 10)
+            redis
+	  end
+      end
+     
       def register(name, pw)
         chars = [*'A'..'~']
         salt = 1.upto(20).map { chars.sample }.join('')
@@ -97,22 +107,18 @@ module Isuda
       end
 
       def htmlify(content)
-        keywords = db.xquery(%| select keyword from entry order by character_length(keyword) desc |)
-        pattern = keywords.map {|k| Regexp.escape(k[:keyword]) }.join('|')
-        kw2hash = {}
-        hashed_content = content.gsub(/(#{pattern})/) {|m|
+        # keywords = db.xquery(%| select keyword from entry order by character_length(keyword) desc |)
+	pattern = redis.sort("isuda_keyword", {:order=> 'desc alpha'}).join('|').force_encoding('utf-8')
+        # pattern = keywords.map {|k| Regexp.escape(k) }.join('|')
+        # pattern = keywords.map {|k| Regexp.escape(k[:keyword]) }.join('|')
+        escaped_content = Rack::Utils.escape_html(content)
+        hashed_content = escaped_content.gsub(/(#{pattern})/) {|m|
           matched_keyword = $1
-          "isuda_#{Digest::SHA1.hexdigest(matched_keyword)}".tap do |hash|
-            kw2hash[matched_keyword] = hash
-          end
+	  keyword_url = url("/keyword/#{Rack::Utils.escape_path(matched_keyword)}")
+          anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(matched_keyword)]
+	  anchor
         }
-        escaped_content = Rack::Utils.escape_html(hashed_content)
-        kw2hash.each do |(keyword, hash)|
-          keyword_url = url("/keyword/#{Rack::Utils.escape_path(keyword)}")
-          anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
-          escaped_content.gsub!(hash, anchor)
-        end
-        escaped_content.gsub(/\n/, "<br />\n")
+        hashed_content.gsub(/\n/, "<br />\n")
       end
 
       def uri_escape(str)
@@ -140,6 +146,12 @@ module Isuda
       # isutar_initialize_url.path = '/initialize'
       # Net::HTTP.get_response(isutar_initialize_url)
 
+      redis.flushall()
+      keywords = db.xquery(%| select * from entry order by character_length(keyword) desc |)
+      keywords.map { |k|
+	redis.sadd 'isuda_keyword', k[:keyword]
+      }
+ 
       content_type :json
       JSON.generate(result: 'ok')
     end
@@ -222,7 +234,7 @@ module Isuda
       keyword = params[:keyword] || ''
       halt(400) if keyword == ''
       description = params[:description]
-      halt(400) if is_spam_content(description) || is_spam_content(keyword)
+      halt(400) if is_spam_content(description + ' ' + keyword)
 
       bound = [@user_id, keyword, description] * 2
       db.xquery(%|
@@ -231,6 +243,8 @@ module Isuda
         ON DUPLICATE KEY UPDATE
         author_id = ?, keyword = ?, description = ?, updated_at = NOW()
       |, *bound)
+      # entry = {:author_id => @user_id, :keyword => keyword, :description => description}
+      redis.sadd('isuda_keyword', keyword)
 
       redirect_found '/'
     end
@@ -258,6 +272,7 @@ module Isuda
       end
 
       db.xquery(%| DELETE FROM entry WHERE keyword = ? |, keyword)
+      redis.srem('isuda_keyword', keyword)
 
       redirect_found '/'
     end
