@@ -30,6 +30,13 @@ module Isuda
       register Sinatra::Reloader
     end
 
+    configure do
+      enable :logging
+      file = File.new("#{settings.root}/log/#{settings.environment}.log", 'a+')
+      file.sync = true
+      use Rack::CommonLogger, file
+    end
+
     set(:set_name) do |value|
       condition {
         user_id = session[:user_id]
@@ -90,7 +97,7 @@ module Isuda
       end
 
       def htmlify(content)
-        keywords = db.xquery(%| select * from entry order by character_length(keyword) desc |)
+        keywords = db.xquery(%| select keyword from entry order by character_length(keyword) desc |)
         pattern = keywords.map {|k| Regexp.escape(k[:keyword]) }.join('|')
         kw2hash = {}
         hashed_content = content.gsub(/(#{pattern})/) {|m|
@@ -127,7 +134,7 @@ module Isuda
     end
 
     get '/initialize' do
-      db.xquery('TRUNCATE star')
+      db.xquery(%|TRUNCATE star|)
       db.xquery(%| DELETE FROM entry WHERE id > 7101 |)
       # isutar_initialize_url = URI(settings.isutar_origin)
       # isutar_initialize_url.path = '/initialize'
@@ -149,7 +156,7 @@ module Isuda
       |)
       entries.each do |entry|
         entry[:html] = htmlify(entry[:description])
-        stars = db.xquery(%| select * from star where keyword = ?|, entry[:keyword] || '').to_a
+        stars = db.xquery(%| SELECT * from star where keyword = ?|, entry[:keyword] || '').to_a
         entry[:stars] = stars
       end
 
@@ -256,7 +263,7 @@ module Isuda
     end
 
     post '/stars' do
-      keyword = params[:keyword] || ''
+      keyword = params[:keyword]
       unless db.xquery(%| SELECT COUNT(*) as key_count FROM entry WHERE keyword = ?|,keyword).first[:key_count].to_i > 0
         halt(404)
       end
